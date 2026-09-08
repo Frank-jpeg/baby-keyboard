@@ -6,8 +6,10 @@ using BabyKeyboard.Core;
 
 namespace BabyKeyboard.App;
 
-internal readonly record struct InputSignal(int VirtualKey, int X = 0, int Y = 0, bool Click = false);
-internal sealed record InputSnapshot(UnlockPhase Phase, double Progress, int HeldCount);
+internal readonly record struct InputSignal(int VirtualKey, int X = 0, int Y = 0, bool Click = false,
+    SoundPreset Sound = SoundPreset.Crystal);
+internal sealed record InputSnapshot(UnlockPhase Phase, double Progress, int HeldCount,
+    SoundPreset Sound = SoundPreset.Crystal, long SoundRevision = 0);
 
 internal sealed class InputInterceptor : IDisposable
 {
@@ -25,6 +27,8 @@ internal sealed class InputInterceptor : IDisposable
     private long pulse = Stopwatch.GetTimestamp();
     private bool completeNotified;
     private int stopping;
+    private SoundPreset selectedSound;
+    private long soundRevision;
     internal bool SimulateMouseHookFailure { get; init; }
     public event Action? Unlocked;
     public event Action<Exception>? Failed;
@@ -102,7 +106,7 @@ internal sealed class InputInterceptor : IDisposable
         Interlocked.Exchange(ref pulse, Stopwatch.GetTimestamp());
         double now = Now;
         controller.Tick(now);
-        Volatile.Write(ref snapshot, new(controller.Phase, controller.Progress(now), controller.HeldCount));
+        Volatile.Write(ref snapshot, new(controller.Phase, controller.Progress(now), controller.HeldCount, selectedSound, soundRevision));
         if (controller.Phase == UnlockPhase.Complete && !completeNotified)
         {
             completeNotified = true;
@@ -121,7 +125,14 @@ internal sealed class InputInterceptor : IDisposable
             int message = (int)wParam;
             if (message is Native.WmKeyDown or Native.WmSysKeyDown)
             {
-                if (controller.KeyDown(key, Now)) signals.Writer.TryWrite(new(key.VirtualKey));
+                if (controller.KeyDown(key, Now))
+                {
+                    var choice = SoundPresets.FromNumpad(key);
+                    if (choice is { } sound) { selectedSound = sound; soundRevision++; }
+                    // Selection is durable in the snapshot even if visual events are dropped during a burst.
+                    int labelKey = choice is { } digit ? 0x61 + (int)digit : key.VirtualKey;
+                    signals.Writer.TryWrite(new(labelKey, Sound: selectedSound));
+                }
             }
             else if (message is Native.WmKeyUp or Native.WmSysKeyUp)
                 controller.KeyUp(key, Now);
@@ -154,7 +165,7 @@ internal sealed class InputInterceptor : IDisposable
                 if (down)
                 {
                     if (controller.ButtonDown(b, Now))
-                        signals.Writer.TryWrite(new(0, data.Position.X, data.Position.Y, true));
+                        signals.Writer.TryWrite(new(0, data.Position.X, data.Position.Y, true, selectedSound));
                 }
                 else
                 {

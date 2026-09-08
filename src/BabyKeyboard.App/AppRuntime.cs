@@ -25,6 +25,8 @@ internal sealed class AppRuntime
     private int exitRequested, exitCode;
     private long uiPulse = Stopwatch.GetTimestamp();
     private long reportedUiPulse, reportedInputPulse;
+    private SoundPreset selectedSound;
+    private long appliedSoundRevision;
     private double lastFrame;
 
     internal AppRuntime(AppOptions options)
@@ -103,7 +105,16 @@ internal sealed class AppRuntime
 
     private GuardWindow MakeWindow(Native.Monitor monitor)
     {
-        var window = new GuardWindow(monitor, options.Preview, () => RequestExit(), QueueDisplayUpdate);
+        var window = new GuardWindow(monitor, options.Preview, () => RequestExit(), QueueDisplayUpdate)
+        {
+            TestQuery = options.Test ? query => query switch
+            {
+                0 => (int)selectedSound + 1,
+                1 => appliedSoundRevision,
+                _ => -1
+            } : null
+        };
+        window.Scene.SelectSound(selectedSound, animate: false);
         if (options.Preview) window.Closed += (_, _) => RequestExit();
         return window;
     }
@@ -145,6 +156,23 @@ internal sealed class AppRuntime
         double now = age.Elapsed.TotalSeconds;
         if (now - lastFrame < 1.0 / 65 || stopped) return;
         lastFrame = now;
+        InputSnapshot snapshot;
+        if (options.Preview)
+        {
+            double ms = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
+            previewUnlock.Tick(ms);
+            snapshot = new(previewUnlock.Phase, previewUnlock.Progress(ms), previewUnlock.HeldCount, selectedSound);
+            if (previewUnlock.Phase == UnlockPhase.Complete) RequestExit();
+        }
+        else
+        {
+            snapshot = input?.Snapshot ?? new(UnlockPhase.Playing, 0, 0);
+            if (snapshot.SoundRevision != appliedSoundRevision)
+            {
+                appliedSoundRevision = snapshot.SoundRevision;
+                SelectSound(snapshot.Sound);
+            }
+        }
         int budget = 32;
         while (budget-- > 0 && input is not null && input.TryRead(out var signal))
         {
@@ -158,17 +186,8 @@ internal sealed class AppRuntime
                 }
                 else window.Scene.AddKey(signal.VirtualKey);
             }
-            audio?.Play(signal.VirtualKey);
+            if (signal.Sound == selectedSound) audio?.Play(signal.VirtualKey);
         }
-        InputSnapshot snapshot;
-        if (options.Preview)
-        {
-            double ms = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
-            previewUnlock.Tick(ms);
-            snapshot = new(previewUnlock.Phase, previewUnlock.Progress(ms), previewUnlock.HeldCount);
-            if (previewUnlock.Phase == UnlockPhase.Complete) RequestExit();
-        }
-        else snapshot = input?.Snapshot ?? new(UnlockPhase.Playing, 0, 0);
         foreach (var window in windows)
         {
             window.Scene.Input = snapshot;
@@ -177,30 +196,41 @@ internal sealed class AppRuntime
         }
     }
 
+    private void SelectSound(SoundPreset sound)
+    {
+        selectedSound = sound;
+        audio?.SelectPreset(sound);
+        foreach (var window in windows) window.Scene.SelectSound(sound);
+    }
+
     private void InstallPreviewInput(GuardWindow window)
     {
         static double Now() => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
-        window.PreviewKeyDown += (_, e) =>
+        static PointerButton Button(MouseButton button) => button switch
         {
-            int key = KeyInterop.VirtualKeyFromKey(e.Key == Key.System ? e.SystemKey : e.Key);
-            if (key == 0x1B) { RequestExit(); return; }
-            if (previewUnlock.KeyDown(new(key), Now())) { window.Scene.AddKey(key); audio?.Play(key); }
-            e.Handled = true;
+            MouseButton.Left => PointerButton.Left, MouseButton.Right => PointerButton.Right,
+            MouseButton.Middle => PointerButton.Middle, MouseButton.XButton1 => PointerButton.Back,
+            _ => PointerButton.Forward
         };
-        window.PreviewKeyUp += (_, e) =>
+        window.PreviewKeyboard = (key, down) =>
         {
-            previewUnlock.KeyUp(new(KeyInterop.VirtualKeyFromKey(e.Key == Key.System ? e.SystemKey : e.Key)), Now());
-            e.Handled = true;
+            if (!down) { previewUnlock.KeyUp(key, Now()); return; }
+            if (!previewUnlock.KeyDown(key, Now())) return;
+            var choice = SoundPresets.FromNumpad(key);
+            if (choice is { } sound) { appliedSoundRevision++; SelectSound(sound); }
+            int labelKey = choice is { } digit ? 0x61 + (int)digit : key.VirtualKey;
+            window.Scene.AddKey(labelKey);
+            audio?.Play(labelKey);
         };
         window.PreviewMouseDown += (_, e) =>
         {
-            var button = e.ChangedButton == MouseButton.Left ? PointerButton.Left : PointerButton.Right;
-            previewUnlock.ButtonDown(button, Now());
-            window.Scene.AddClick(e.GetPosition(window.Scene));
-            audio?.Play(0);
+            if (previewUnlock.ButtonDown(Button(e.ChangedButton), Now()))
+            {
+                window.Scene.AddClick(e.GetPosition(window.Scene));
+                audio?.Play(0);
+            }
         };
-        window.PreviewMouseUp += (_, e) => previewUnlock.ButtonUp(
-            e.ChangedButton == MouseButton.Left ? PointerButton.Left : PointerButton.Right, Now());
+        window.PreviewMouseUp += (_, e) => previewUnlock.ButtonUp(Button(e.ChangedButton), Now());
     }
 
     private static void RestrictCursor(Native.Monitor monitor)

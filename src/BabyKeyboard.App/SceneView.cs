@@ -21,6 +21,8 @@ internal sealed class SceneView : FrameworkElement
     private int sequence;
     private bool hasPlayed;
     private double? manualTime;
+    private SoundPreset selectedSound;
+    private double soundSelectedAt = double.NegativeInfinity;
     internal bool Preview { get; set; }
     internal bool SoundAvailable { get; set; } = true;
     internal InputSnapshot Input { get; set; } = new(UnlockPhase.Playing, 0, 0);
@@ -42,6 +44,13 @@ internal sealed class SceneView : FrameworkElement
             slot.Y + (random.NextDouble() - .5) * .04, sequence % Colors.Length,
             Time, (random.NextDouble() - .5) * 15, false));
         sequence++;
+    }
+
+    internal void SelectSound(SoundPreset sound, bool animate = true)
+    {
+        selectedSound = sound;
+        if (animate) soundSelectedAt = Time;
+        InvalidateVisual();
     }
 
     internal void AddClick(Point position)
@@ -213,30 +222,53 @@ internal sealed class SceneView : FrameworkElement
 
     private void DrawFooter(DrawingContext dc, double w, double h, double scale)
     {
-        double width = 392 * scale, height = 70 * scale;
-        var pill = new Rect((w - width) / 2, h - 111 * scale, width, height);
+        scale = Math.Min(scale, Math.Max(.2, (w - 32) / 1056));
+        double left = (w - 1056 * scale) / 2;
+        double top = h - 152 * scale;
+        var soundPanel = new Rect(left, top, 684 * scale, 108 * scale);
+        bool justSelected = Time - soundSelectedAt < 1.1;
+        dc.DrawRoundedRectangle(Brush("#121E2C"), new Pen(Brush(justSelected ? "#83C8BA" : "#30404E"), 1), soundPanel, 19 * scale, 19 * scale);
+        var selected = SoundPresets.Get(selectedSound);
+        Text(dc, selected.Name, 18 * scale, "#C9F6E8", new(left + 20 * scale, top + 11 * scale));
+        Text(dc, selected.Description, 10 * scale, "#8099A6", new(left + 21 * scale, top + 39 * scale));
+        Text(dc, "小键盘 1～8 切换音色", 11 * scale, "#9CADBA", new(soundPanel.Right - 159 * scale, top + 18 * scale));
+        foreach (var sound in SoundPresets.All)
+        {
+            bool chosen = sound.Preset == selectedSound;
+            var chip = new Rect(left + (18 + (sound.Number - 1) * 82) * scale, top + 64 * scale, 74 * scale, 29 * scale);
+            dc.DrawRoundedRectangle(Brush(chosen ? "#214139" : "#192737"),
+                new Pen(Brush(chosen ? "#75BCA9" : "#2E4152"), .8), chip, 8 * scale, 8 * scale);
+            var number = new Rect(chip.X + 5 * scale, chip.Y + 5 * scale, 19 * scale, 19 * scale);
+            dc.DrawRoundedRectangle(Brush(chosen ? "#88DBBD" : "#2D4254"), null, number, 5 * scale, 5 * scale);
+            CenterText(dc, sound.Number.ToString(CultureInfo.InvariantCulture), 11 * scale, chosen ? "#142D28" : "#A9BCCB",
+                new(number.X + number.Width / 2, number.Y + 1 * scale));
+            Text(dc, sound.ShortName, 11 * scale, chosen ? "#D7F8E9" : "#9DB0BF", new(chip.X + 29 * scale, chip.Y + 6 * scale));
+        }
+
+        double width = 354 * scale;
+        var pill = new Rect(soundPanel.Right + 18 * scale, top, width, 108 * scale);
         bool active = Input.Phase is UnlockPhase.Holding or UnlockPhase.AwaitingRelease or UnlockPhase.Complete;
         dc.DrawRoundedRectangle(Brush(active ? "#163431" : "#121E2C"), new Pen(Brush(active ? "#6CA99C" : "#30404E"), 1), pill, 19 * scale, 19 * scale);
-        var key = new Rect(pill.X + 18 * scale, pill.Y + 16 * scale, 44 * scale, 36 * scale);
+        var key = new Rect(pill.X + 18 * scale, pill.Y + 31 * scale, 51 * scale, 38 * scale);
         dc.DrawRoundedRectangle(Brush("#223644"), new Pen(Brush("#637987"), .8), key, 9 * scale, 9 * scale);
-        CenterText(dc, "↵", 26 * scale, "#BCDAD9", new(key.X + key.Width / 2, key.Y - 1 * scale));
+        CenterText(dc, "Esc", 17 * scale, "#BCDAD9", new(key.X + key.Width / 2, key.Y + 6 * scale));
         string headline = Input.Phase switch
         {
-            UnlockPhase.Holding => "继续按住回车…",
-            UnlockPhase.AwaitingRelease or UnlockPhase.Complete => "已解锁，松开所有按键",
-            _ => "长按回车 3 秒退出"
+            UnlockPhase.Holding => "继续按住 Esc…",
+            UnlockPhase.AwaitingRelease or UnlockPhase.Complete => "松手退出",
+            _ => "长按 Esc 3 秒退出"
         };
         string detail = Input.Phase switch
         {
             UnlockPhase.Holding => $"还有 {Math.Max(0, 3 * (1 - Input.Progress)):0.0} 秒 · 提前松开会取消",
-            UnlockPhase.AwaitingRelease or UnlockPhase.Complete => "松手后，即可返回桌面",
+            UnlockPhase.AwaitingRelease or UnlockPhase.Complete => "松开所有按键和鼠标按钮",
             _ => "按满后松手，即可返回桌面"
         };
-        Text(dc, headline, 16 * scale, active ? "#C7FBE7" : "#D0DEE6", new(pill.X + 77 * scale, pill.Y + 12 * scale));
-        Text(dc, detail, 11 * scale, "#849CA7", new(pill.X + 77 * scale, pill.Y + 40 * scale));
+        Text(dc, headline, 16 * scale, active ? "#C7FBE7" : "#D0DEE6", new(pill.X + 84 * scale, pill.Y + 26 * scale));
+        Text(dc, detail, 11 * scale, "#849CA7", new(pill.X + 84 * scale, pill.Y + 58 * scale));
         if (active)
         {
-            var line = new Rect(pill.X + 18 * scale, pill.Bottom - 5 * scale, (width - 36 * scale) * Input.Progress, 2 * scale);
+            var line = new Rect(pill.X + 18 * scale, pill.Bottom - 8 * scale, (width - 36 * scale) * Input.Progress, 2 * scale);
             dc.DrawRoundedRectangle(Brush("#9BF3CC"), null, line, scale, scale);
         }
         double pad = 46 * scale;
@@ -244,11 +276,11 @@ internal sealed class SceneView : FrameworkElement
         {
             double barHeight = (SoundAvailable ? new[] { 5, 12, 8, 16 }[i] : 3) * scale;
             dc.DrawRoundedRectangle(Brush(SoundAvailable ? "#79A39E" : "#60717E"), null,
-                new Rect(pad + i * 5 * scale, h - 45 * scale - barHeight, 2 * scale, barHeight), scale, scale);
+                new Rect(pad + i * 5 * scale, h - 19 * scale - barHeight, 2 * scale, barHeight), scale, scale);
         }
-        Text(dc, SoundAvailable ? "柔和音效" : "静音运行", 11 * scale, "#82949F", new(pad + 29 * scale, h - 60 * scale));
+        Text(dc, SoundAvailable ? "柔和音效 · 8 种小惊喜" : "静音运行 · 仍可选择音色", 11 * scale, "#82949F", new(pad + 29 * scale, h - 34 * scale));
         string right = Preview ? "预览不会拦截键鼠" : "放心敲，慢慢玩。";
-        Text(dc, right, 11 * scale, "#627786", new(w - pad - 116 * scale, h - 60 * scale));
+        Text(dc, right, 11 * scale, "#627786", new(w - pad - 116 * scale, h - 34 * scale));
     }
 
     private Geometry Glyph(string label)

@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using BabyKeyboard.App;
+using BabyKeyboard.Core;
 
 namespace BabyKeyboard.Tests;
 
@@ -12,15 +13,20 @@ internal static partial class Program
 {
     private const nuint Tag = 0x42414259;
     private static readonly HashSet<(int Vk, bool Extended)> InjectedDown = [];
+    private static readonly HashSet<(int Scan, bool Extended)> InjectedScans = [];
+    private static readonly HashSet<uint> InjectedMouseReleases = [];
 
     private static void RunAudioCheck()
     {
-        Test("Native PCM output opens and keeps playing soft tones", () =>
+        using var player = new TonePlayer();
+        for (int i = 0; i < 60 && !player.Available; i++) Thread.Sleep(50);
+        foreach (var sound in SoundPresets.All)
+        Test($"Native PCM output plays {sound.Preset} and accepts live selection", () =>
         {
-            using var player = new TonePlayer();
-            for (int i = 0; i < 40 && !player.Available; i++) Thread.Sleep(50);
             Check(player.Available, "No usable default PCM output device.");
-            foreach (int key in new[] { 65, 68, 71 }) { player.Play(key); Thread.Sleep(180); }
+            player.SelectPreset(sound.Preset); Thread.Sleep(180);
+            foreach (int key in new[] { 0, 2, 4 }) { player.Play(key); Thread.Sleep(180); }
+            Thread.Sleep(220);
             Check(player.Available, "The audio driver rejected playback buffers.");
         });
     }
@@ -34,6 +40,7 @@ internal static partial class Program
         bool unrestricted = baseline == Native.VirtualBounds;
         using var fixture = new SafetyFixture();
         using var observer = new HookObserver();
+        bool originalNumLock = fixture.NumLock;
         try
         {
             Test("Native protection blocks key, mouse, wheel, Win, Alt+Tab and Alt+F4 events", () =>
@@ -54,39 +61,94 @@ internal static partial class Program
                 Native.GetClipCursor(out var clipped);
                 Check(clipped == Native.Monitors()[0].Bounds.Inset(8), "Cursor was not clipped to the protected area.");
 
-                Down(13); Thread.Sleep(1200); Up(13); Thread.Sleep(100);
-                Check(!child.Process.HasExited, "A short Enter incorrectly unlocked.");
-                Down(13); Thread.Sleep(400); Tap(65); Thread.Sleep(2900); Up(13);
+                Down(27); Thread.Sleep(1200); Up(27); Thread.Sleep(100);
+                Check(!child.Process.HasExited, "A short Esc incorrectly unlocked.");
+                Down(27); Thread.Sleep(400); Tap(65); Thread.Sleep(2900); Up(27);
                 Thread.Sleep(100); Check(!child.Process.HasExited, "Other-key cancellation failed.");
-                Down(13, true); Thread.Sleep(3200);
-                Check(!child.Process.HasExited, "Exited before the held Enter was released.");
-                Up(13, true);
+                Down(27); Thread.Sleep(3200);
+                Check(!child.Process.HasExited, "Exited before the held Esc was released.");
+                Down(65); Mouse(0x2); Up(27); Thread.Sleep(100);
+                Check(!child.Process.HasExited, "Exited before all inputs were released.");
+                Up(65); Mouse(0x4);
                 child.WaitForExit();
                 Check(child.Process.ExitCode == 0, "Unexpected exit code.");
-                Check(observer.KeyboardEvents == 0, "The final Enter leaked to the background.");
+                Check(observer.KeyboardEvents == 0 && observer.MouseEvents == 0, "Final release events leaked to the background.");
                 CheckRestored(baseline);
                 fixture.Focus(); observer.Reset(); Tap(65); Mouse(0x2); Mouse(0x4); Thread.Sleep(100);
                 Check(observer.KeyboardEvents == 2 && observer.MouseEvents == 2, "Input did not resume after exit.");
             });
 
-            Test("An Enter held at launch must be released before it can unlock", () =>
+            Test("An Esc held at launch must be released before it can unlock", () =>
             {
                 fixture.Focus(); Check(ForegroundIsOurs());
-                Down(13);
+                Down(27);
                 using var child = new ProtectedRun(appPath, fixture, 20);
-                for (int i = 0; i < 32; i++) { Down(13); Thread.Sleep(100); }
-                Check(!child.Process.HasExited, "The startup Enter triggered unlock.");
-                Up(13); Thread.Sleep(100);
-                Down(13); Thread.Sleep(3200); Up(13);
+                for (int i = 0; i < 32; i++) { Down(27); Thread.Sleep(100); }
+                Check(!child.Process.HasExited, "The startup Esc triggered unlock.");
+                Up(27); Thread.Sleep(100);
+                Down(27); Thread.Sleep(3200); Up(27);
                 child.WaitForExit(); Check(child.Process.ExitCode == 0); CheckRestored(baseline);
+            });
+
+            Test("Numpad selection reaches the live UI, ignores repeat and leaves Enter as an ordinary key", () =>
+            {
+                using var child = new ProtectedRun(appPath, fixture, 25);
+                fixture.Focus(); observer.Reset();
+                Check(ReadTestState(child, 0) == 1, "Unexpected default instrument.");
+                for (int number = 1; number <= 8; number++)
+                {
+                    Tap(0x60 + number); WaitForSound(child, number);
+                }
+                Down(0x62); WaitForSound(child, 2);
+                long revision = ReadTestState(child, 1);
+                for (int i = 0; i < 40; i++) { Down(0x62); Thread.Sleep(10); }
+                Check(ReadTestState(child, 1) == revision, "Auto-repeat selected the sound more than once.");
+                Up(0x62);
+                Tap(0x35); Tap(0x26, true); Tap(0x23, true);
+                foreach (bool extended in new[] { false, true })
+                {
+                    Down(13, extended); Thread.Sleep(3200); Up(13, extended);
+                    Check(!child.Process.HasExited, "Enter still exits the app.");
+                    Check(ReadTestState(child, 0) == 2 && ReadTestState(child, 1) == revision, "Ordinary keys changed the sound.");
+                }
+                Tap(0x68);
+                for (int i = 0; i < 350; i++) Tap(65 + i % 26);
+                WaitForSound(child, 8);
+                Down(27); Thread.Sleep(3200); Up(27);
+                child.WaitForExit(); Check(child.Process.ExitCode == 0);
+                Check(observer.KeyboardEvents == 0, "Selection or exit leaked to other programs.");
+                CheckRestored(baseline);
+            });
+
+            Test("Physical numpad 1 to 8 work with both real Num Lock states", () =>
+            {
+                int[] scans = [0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47, 0x48];
+                foreach (bool numLock in new[] { false, true })
+                {
+                    fixture.SetNumLock(numLock);
+                    using var child = new ProtectedRun(appPath, fixture, 12);
+                    fixture.Focus(); observer.Reset();
+                    for (int i = 0; i < scans.Length; i++)
+                    {
+                        TapScan(scans[i]); WaitForSound(child, i + 1);
+                    }
+                    TapScan(0x48, true); TapScan(0x4F, true); // Dedicated Up / End must not select sounds.
+                    TapScan(0x52); TapScan(0x49); // Numpad 0 / 9 remain ordinary keys.
+                    Thread.Sleep(100); Check(ReadTestState(child, 0) == 8);
+                    Down(27); Thread.Sleep(3200); Up(27);
+                    child.WaitForExit(); Check(child.Process.ExitCode == 0);
+                    Check(observer.KeyboardEvents == 0, "A physical numpad event leaked.");
+                    CheckRestored(baseline);
+                }
             });
 
             Test("Audio failure leaves the protected interaction usable", () =>
             {
                 using var child = new ProtectedRun(appPath, fixture, 10, "--test-audio-failure");
                 fixture.Focus(); observer.Reset(); Tap(66); Thread.Sleep(100);
+                Tap(0x68); WaitForSound(child, 8);
                 Check(observer.KeyboardEvents == 0 && !child.Process.HasExited);
-                Down(13); Thread.Sleep(3200); Up(13);
+                Down(27); Thread.Sleep(3200); Up(27);
                 child.WaitForExit(); Check(child.Process.ExitCode == 0); CheckRestored(baseline);
             });
 
@@ -144,6 +206,7 @@ internal static partial class Program
         {
             fixture.Focus(); ReleaseInjected();
             Native.RestoreClip(baseline, unrestricted);
+            fixture.SetNumLock(originalNumLock);
             SetCursorPos(cursor.X, cursor.Y);
             if (previous != 0) Native.SetForegroundWindow(previous);
         }
@@ -178,6 +241,40 @@ internal static partial class Program
     private static void ReleaseInjected()
     {
         foreach (var key in InjectedDown.ToArray()) Up(key.Vk, key.Extended);
+        foreach (var key in InjectedScans.ToArray()) SendScan(key.Scan, true, key.Extended);
+        InjectedScans.Clear();
+        foreach (uint release in InjectedMouseReleases.ToArray()) Mouse(release);
+    }
+    private static void TapScan(int scan, bool extended = false)
+    {
+        SendScan(scan, false, extended); InjectedScans.Add((scan, extended));
+        SendScan(scan, true, extended); InjectedScans.Remove((scan, extended));
+    }
+    private static void SendScan(int scan, bool up, bool extended)
+    {
+        var input = new OsInput { Type = 1, Union = new InputUnion { Key = new KeyInput
+            { Scan = (ushort)scan, Flags = 8u | (up ? 2u : 0u) | (extended ? 1u : 0u), Extra = Tag } } };
+        Check(SendInput(1, [input], Marshal.SizeOf<OsInput>()) == 1, "Physical key injection failed.");
+    }
+
+    private static long ReadTestState(ProtectedRun child, int query)
+    {
+        Check(!child.Process.HasExited, "App exited before its state could be checked.");
+        child.Process.Refresh();
+        Check(child.Process.MainWindowHandle != 0, "No application test window.");
+        Check(SendMessageTimeout(child.Process.MainWindowHandle, 0x8031, (nuint)query, 0, 3, 300, out var value) != 0,
+            "The UI did not respond to the read-only test query.");
+        return (long)value;
+    }
+
+    private static void WaitForSound(ProtectedRun child, int number)
+    {
+        for (int i = 0; i < 30; i++)
+        {
+            if (ReadTestState(child, 0) == number) return;
+            Thread.Sleep(30);
+        }
+        throw new InvalidOperationException($"The UI did not select instrument {number}.");
     }
     private static void SendKey(int vk, bool up, bool extended)
     {
@@ -190,6 +287,11 @@ internal static partial class Program
         var input = new OsInput { Type = 0, Union = new InputUnion { Mouse = new MouseInput
             { Flags = flags, Data = data, Extra = Tag } } };
         Check(SendInput(1, [input], Marshal.SizeOf<OsInput>()) == 1, "Mouse input injection failed.");
+        foreach (var (down, up) in new[] { (2u, 4u), (8u, 16u), (32u, 64u) })
+        {
+            if ((flags & down) != 0) InjectedMouseReleases.Add(up);
+            if ((flags & up) != 0) InjectedMouseReleases.Remove(up);
+        }
     }
 
     private sealed class ProtectedRun : IDisposable
@@ -279,6 +381,13 @@ internal static partial class Program
                 finally { if (attached) AttachThreadInput(current, foreground, false); }
             });
         }
+        internal bool NumLock => window!.Dispatcher.Invoke(() => (GetKeyState(0x90) & 1) != 0);
+        internal void SetNumLock(bool enabled)
+        {
+            Focus(); Check(ForegroundIsOurs(), "Could not focus the safe target for Num Lock restoration.");
+            if (NumLock != enabled) { Tap(0x90, true); Thread.Sleep(100); }
+            Check(NumLock == enabled, "Num Lock did not reach the requested state.");
+        }
         public void Dispose()
         {
             window!.Dispatcher.Invoke(() => { allowClose = true; window.Close(); Dispatcher.CurrentDispatcher.BeginInvokeShutdown(DispatcherPriority.Send); });
@@ -350,4 +459,7 @@ internal static partial class Program
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool AttachThreadInput(uint first, uint second, bool attach);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool PostMessage(nint hwnd, uint message, nuint wParam, nint lParam);
+    [DllImport("user32.dll")] private static extern short GetKeyState(int vk);
+    [DllImport("user32.dll", SetLastError = true)] private static extern nint SendMessageTimeout(nint hwnd, uint message, nuint wParam, nint lParam,
+        uint flags, uint timeout, out nuint result);
 }

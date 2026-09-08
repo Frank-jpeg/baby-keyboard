@@ -18,10 +18,10 @@ $env:NUGET_PACKAGES = Join-Path $projectRoot '.packages'
 $appProject = Join-Path $projectRoot 'src\BabyKeyboard.App\BabyKeyboard.App.csproj'
 $testProject = Join-Path $projectRoot 'tests\BabyKeyboard.Tests\BabyKeyboard.Tests.csproj'
 $testExe = Join-Path $projectRoot 'tests\BabyKeyboard.Tests\bin\Release\net10.0-windows\BabyKeyboard.Tests.exe'
-$releaseDir = Join-Path $projectRoot 'artifacts\release'
-$publishDir = Join-Path $projectRoot 'artifacts\publish'
 [xml]$metadata = Get-Content -LiteralPath $appProject -Encoding UTF8 -Raw
 $version = [string]$metadata.Project.PropertyGroup.Version
+$releaseDir = Join-Path $projectRoot ('artifacts\release\v' + $version)
+$publishDir = Join-Path $projectRoot ('artifacts\publish\v' + $version)
 $title = [string]$metadata.Project.PropertyGroup.AssemblyTitle
 $releaseExe = Join-Path $releaseDir ($title + '-v' + $version + '.exe')
 New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
@@ -64,12 +64,16 @@ if (-not $previewProcess.WaitForExit(20000)) {
 if ($previewProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $previewPath)) { throw 'Preview render failed.' }
 $previewProcess.Dispose()
 
+$soundPreview = Join-Path $releaseDir 'sound-preview.wav'
+& $testExe --export-sounds $soundPreview
+if ($LASTEXITCODE -ne 0) { throw 'Sound preview export failed.' }
+
 if ($NativeTests) {
     & $testExe --integration $releaseExe
     if ($LASTEXITCODE -ne 0) { throw 'Native integration tests failed.' }
 }
 $archivePath = Join-Path $releaseDir ($title + '-v' + $version + '-win-x64.zip')
-Compress-Archive -LiteralPath @($releaseExe, $usageTarget, $previewPath, $noticesPath) -DestinationPath $archivePath -Force
+Compress-Archive -LiteralPath @($releaseExe, $usageTarget, $previewPath, $soundPreview, $noticesPath) -DestinationPath $archivePath -Force
 $hash = (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText((Join-Path $releaseDir 'SHA256.txt'), $hash + '  ' + [IO.Path]::GetFileName($releaseExe) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
 Write-Output $releaseExe

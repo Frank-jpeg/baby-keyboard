@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using BabyKeyboard.Core;
 
 namespace BabyKeyboard.App;
 
@@ -15,6 +16,8 @@ internal sealed class GuardWindow : Window
     internal Native.Monitor Monitor { get; private set; }
     internal bool AllowClose { get; set; }
     internal nint Handle => new WindowInteropHelper(this).Handle;
+    internal Action<PhysicalKey, bool>? PreviewKeyboard { get; set; }
+    internal Func<int, long>? TestQuery { get; init; }
 
     internal GuardWindow(Native.Monitor monitor, bool preview, Action sessionEnded, Action displaysChanged)
     {
@@ -66,6 +69,19 @@ internal sealed class GuardWindow : Window
 
     private nint WindowMessages(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
+        if (message == 0x8031 && TestQuery is not null)
+        {
+            handled = true;
+            return (nint)TestQuery((int)wParam);
+        }
+        if (!protectedWindow && PreviewKeyboard is not null &&
+            message is Native.WmKeyDown or Native.WmKeyUp or Native.WmSysKeyDown or Native.WmSysKeyUp)
+        {
+            var key = new PhysicalKey((int)wParam, (int)((lParam.ToInt64() >> 16) & 0xFF), (lParam.ToInt64() & (1 << 24)) != 0);
+            PreviewKeyboard(key, message is Native.WmKeyDown or Native.WmSysKeyDown);
+            handled = true;
+            return 0;
+        }
         if (!protectedWindow) return 0;
         if (message == 0x2B1 && (int)wParam is 2 or 4 or 6 or 7) sessionEnded();
         else if (message == 0x218 && (int)wParam == 4) sessionEnded();

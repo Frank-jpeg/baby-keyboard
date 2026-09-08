@@ -5,7 +5,7 @@ namespace BabyKeyboard.Tests;
 internal static partial class Program
 {
     private static int passed, failed;
-    private static readonly PhysicalKey Enter = new(13, 28), NumEnter = new(13, 28, true), A = new(65, 30);
+    private static readonly PhysicalKey Escape = new(27, 1), Enter = new(13, 28), NumEnter = new(13, 28, true), A = new(65, 30);
 
     [STAThread]
     private static int Main(string[] args)
@@ -15,6 +15,11 @@ internal static partial class Program
             RunAudioCheck();
             Console.WriteLine($"RESULT: {passed} passed, {failed} failed");
             return failed == 0 ? 0 : 1;
+        }
+        if (args.FirstOrDefault() == "--export-sounds")
+        {
+            ExportSounds(args[1]);
+            return 0;
         }
         RunCoreTests();
         if (args.Length > 0 && args[0] == "--integration") RunIntegration(args[1]);
@@ -42,85 +47,89 @@ internal static partial class Program
             s.Tick(5000); Check(s.Phase == UnlockPhase.Playing);
             s.KeyUp(A, 5001); Check(s.HeldCount == 0);
         });
-        Test("Short Enter cancels without accumulating", () =>
+        Test("Short Esc cancels without accumulating", () =>
         {
             var s = new UnlockController();
-            for (int i = 0; i < 100; i++) { s.KeyDown(Enter, i * 100); s.KeyUp(Enter, i * 100 + 80); }
+            for (int i = 0; i < 100; i++) { s.KeyDown(Escape, i * 100); s.KeyUp(Escape, i * 100 + 80); }
             Check(s.Phase == UnlockPhase.Playing && s.HeldCount == 0);
         });
         Test("Auto-repeat never shortens the three-second hold", () =>
         {
-            var s = new UnlockController(); s.KeyDown(Enter, 0);
-            for (int i = 1; i < 3000; i++) Check(!s.KeyDown(Enter, i));
+            var s = new UnlockController(); s.KeyDown(Escape, 0);
+            for (int i = 1; i < 3000; i++) Check(!s.KeyDown(Escape, i));
             Check(s.Phase == UnlockPhase.Holding);
             s.Tick(3000); Check(s.Phase == UnlockPhase.AwaitingRelease);
         });
         Test("Unlock only completes on release after full duration", () =>
         {
-            var s = new UnlockController(); s.KeyDown(Enter, 1000);
+            var s = new UnlockController(); s.KeyDown(Escape, 1000);
             s.Tick(3999); Check(s.Phase == UnlockPhase.Holding);
             s.Tick(4000); Check(s.Phase == UnlockPhase.AwaitingRelease && s.HeldCount == 1);
-            s.KeyUp(Enter, 4500); Check(s.Phase == UnlockPhase.Complete && s.HeldCount == 0);
+            s.KeyUp(Escape, 4500); Check(s.Phase == UnlockPhase.Complete && s.HeldCount == 0);
         });
         Test("Release at the threshold works without a timer tick", () =>
         {
-            var s = new UnlockController(); s.KeyDown(Enter, 0); s.KeyUp(Enter, 3000);
+            var s = new UnlockController(); s.KeyDown(Escape, 0); s.KeyUp(Escape, 3000);
             Check(s.Phase == UnlockPhase.Complete);
         });
-        Test("Other keys cancel; releasing them does not restart a held Enter", () =>
+        Test("Other keys cancel; releasing them does not restart a held Esc", () =>
         {
-            var s = new UnlockController(); s.KeyDown(Enter, 0); s.KeyDown(A, 1500);
-            s.KeyUp(A, 1600); s.KeyDown(Enter, 1700); s.Tick(6000);
+            var s = new UnlockController(); s.KeyDown(Escape, 0); s.KeyDown(A, 1500);
+            s.KeyUp(A, 1600); s.KeyDown(Escape, 1700); s.Tick(6000);
             Check(s.Phase == UnlockPhase.Playing);
-            s.KeyUp(Enter, 6100); s.KeyDown(Enter, 6200); s.KeyUp(Enter, 9200);
+            s.KeyUp(Escape, 6100); s.KeyDown(Escape, 6200); s.KeyUp(Escape, 9200);
             Check(s.Phase == UnlockPhase.Complete);
         });
-        Test("Enter started with another key down never arms", () =>
+        Test("Esc started with another key down never arms", () =>
         {
-            var s = new UnlockController(); s.KeyDown(A, 0); s.KeyDown(Enter, 20);
+            var s = new UnlockController(); s.KeyDown(A, 0); s.KeyDown(Escape, 20);
             s.KeyUp(A, 40); s.Tick(9000); Check(s.Phase == UnlockPhase.Playing);
         });
         Test("Mouse buttons cancel a hold", () =>
         {
             foreach (var button in Enum.GetValues<PointerButton>())
             {
-                var s = new UnlockController(); s.KeyDown(Enter, 0); s.ButtonDown(button, 1500);
+                var s = new UnlockController(); s.KeyDown(Escape, 0); s.ButtonDown(button, 1500);
                 s.ButtonUp(button, 1510); s.Tick(6000); Check(s.Phase == UnlockPhase.Playing);
             }
         });
         Test("A held mouse button prevents starting the timer", () =>
         {
-            var s = new UnlockController(); s.ButtonDown(PointerButton.Left, 0); s.KeyDown(Enter, 100);
+            var s = new UnlockController(); s.ButtonDown(PointerButton.Left, 0); s.KeyDown(Escape, 100);
             s.ButtonUp(PointerButton.Left, 110); s.Tick(5000); Check(s.Phase == UnlockPhase.Playing);
         });
-        Test("Numpad Enter is supported", () =>
+        Test("Main and numpad Enter are ordinary keys even after a long hold", () =>
         {
-            var s = new UnlockController(); s.KeyDown(NumEnter, 0); s.KeyUp(NumEnter, 3500);
-            Check(s.Phase == UnlockPhase.Complete);
+            foreach (var key in new[] { Enter, NumEnter })
+            {
+                var s = new UnlockController(); Check(s.KeyDown(key, 0));
+                s.Tick(5000); Check(s.Phase == UnlockPhase.Playing);
+                s.KeyUp(key, 5500); Check(s.HeldCount == 0 && s.Phase == UnlockPhase.Playing);
+            }
         });
-        Test("Main and numpad Enter together do not arm", () =>
+        Test("Enter cancels an Esc hold", () =>
         {
-            var s = new UnlockController(); s.KeyDown(Enter, 0); s.KeyDown(NumEnter, 500);
+            var s = new UnlockController(); s.KeyDown(Escape, 0); s.KeyDown(Enter, 500);
             s.Tick(4000); Check(s.Phase == UnlockPhase.Playing);
         });
-        Test("Enter held before startup must first be released", () =>
+        Test("Esc held before startup must first be released", () =>
         {
-            var s = new UnlockController([13]); s.KeyDown(Enter, 0); s.Tick(6000);
+            var s = new UnlockController([27]); s.KeyDown(Escape, 0); s.Tick(6000);
             Check(s.Phase == UnlockPhase.Playing);
-            s.KeyUp(Enter, 6100); s.KeyDown(Enter, 6200); s.KeyUp(Enter, 9200);
+            s.KeyUp(Escape, 6100); s.KeyDown(Escape, 6200); s.KeyUp(Escape, 9200);
             Check(s.Phase == UnlockPhase.Complete);
         });
         Test("Initially held keyboard and mouse inputs block unlock", () =>
         {
             var s = new UnlockController([65], [PointerButton.Right]);
-            s.KeyDown(Enter, 0); s.Tick(4000); Check(s.Phase == UnlockPhase.Playing);
+            s.KeyDown(Escape, 0); s.Tick(4000); Check(s.Phase == UnlockPhase.Playing);
             s.KeyUp(A, 4100); s.ButtonUp(PointerButton.Right, 4200); s.Tick(9000);
             Check(s.Phase == UnlockPhase.Playing);
         });
         Test("Completed hold drains every new input before exit", () =>
         {
-            var s = new UnlockController(); s.KeyDown(Enter, 0); s.Tick(3000);
-            s.KeyDown(A, 3001); s.ButtonDown(PointerButton.Left, 3002); s.KeyUp(Enter, 3010);
+            var s = new UnlockController(); s.KeyDown(Escape, 0); s.Tick(3000);
+            s.KeyDown(A, 3001); s.ButtonDown(PointerButton.Left, 3002); s.KeyUp(Escape, 3010);
             Check(s.Phase == UnlockPhase.AwaitingRelease);
             s.KeyUp(A, 3020); Check(s.Phase == UnlockPhase.AwaitingRelease);
             s.ButtonUp(PointerButton.Left, 3030); Check(s.Phase == UnlockPhase.Complete);
@@ -128,7 +137,7 @@ internal static partial class Program
         Test("100,000 random transitions preserve release invariants", () =>
         {
             var s = new UnlockController(); var rng = new Random(91);
-            var keys = new[] { Enter, NumEnter, A, new PhysicalKey(66, 48), new PhysicalKey(91, 91, true) };
+            var keys = new[] { Escape, Enter, NumEnter, A, new PhysicalKey(66, 48), new PhysicalKey(91, 91, true) };
             for (int i = 0; i < 100_000; i++)
             {
                 int choice = rng.Next(5); double now = i * 7;
@@ -147,30 +156,47 @@ internal static partial class Program
             for (int i = 0; i < 256; i++) Check(!string.IsNullOrWhiteSpace(KeyLabels.For(i)));
             Check(KeyLabels.For(65) == "A" && KeyLabels.For(32) == "空格");
         });
-        Test("Audio attack is soft, mixing bounded, and the tail becomes silent", () =>
+        Test("Numpad 1 to 8 select the eight instruments directly", () =>
         {
-            var mixer = new SoftToneMixer(); short[] block = new short[512];
-            int peak = 0, maxStep = 0, previous = 0;
-            for (int i = 0; i < 500; i++)
+            Check(SoundPresets.All.Count == 8);
+            for (int i = 0; i < 8; i++)
             {
-                mixer.Trigger(i); mixer.Fill(block);
-                foreach (int sample in block)
-                {
-                    peak = Math.Max(peak, Math.Abs(sample));
-                    maxStep = Math.Max(maxStep, Math.Abs(sample - previous)); previous = sample;
-                }
+                Check(SoundPresets.FromNumpad(new(0x61 + i)) == (SoundPreset)i);
+                Check(SoundPresets.Get((SoundPreset)i).Number == i + 1);
             }
-            Check(peak > 200 && peak < 8000, $"Unexpected amplitude: {peak}");
-            Check(maxStep < 1000, $"Audio discontinuity: {maxStep}");
-            for (int i = 0; i < 40; i++) mixer.Fill(block);
-            Check(block.All(s => s == 0));
+            Check(SoundPresets.Get(SoundPreset.Piano).Number == 2);
+            Check(SoundPresets.FromNumpad(new(0x60)) is null && SoundPresets.FromNumpad(new(0x69)) is null);
         });
-        Test("Audio rate limiting ignores excessive simultaneous notes", () =>
+        Test("Numpad selection works with Num Lock off without changing dedicated arrows", () =>
         {
-            var mixer = new SoftToneMixer(); Check(mixer.Trigger(65));
-            for (int i = 0; i < 1000; i++) Check(!mixer.Trigger(i));
-            short[] buffer = new short[6000]; mixer.Fill(buffer); Check(mixer.Trigger(66));
+            int[] scans = [0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47, 0x48];
+            int[] navigation = [0x23, 0x28, 0x22, 0x25, 0x0C, 0x27, 0x24, 0x26];
+            for (int i = 0; i < 8; i++)
+            {
+                Check(SoundPresets.FromNumpad(new(navigation[i], scans[i])) == (SoundPreset)i);
+                Check(SoundPresets.FromNumpad(new(navigation[i], scans[i], true)) is null);
+                Check(SoundPresets.FromNumpad(new(navigation[i])) is null);
+                Check(SoundPresets.FromNumpad(new(0x31 + i, 2 + i)) is null);
+            }
         });
+        Test("Numpad identity survives Num Lock / Shift VK changes and ignores repeats", () =>
+        {
+            var s = new UnlockController();
+            Check(s.KeyDown(new(0x61, 0x4F), 0));
+            Check(!s.KeyDown(new(0x23, 0x4F), 50));
+            s.KeyUp(new(0x23, 0x4F), 100); Check(s.HeldCount == 0);
+            Check(s.KeyDown(new(0x23, 0x4F), 150));
+            s.KeyUp(new(0x61, 0x4F), 200); Check(s.HeldCount == 0);
+            s.KeyDown(Escape, 300); s.KeyUp(Escape, 3300); Check(s.Phase == UnlockPhase.Complete);
+        });
+        Test("Numpad selection key cancels a pending Esc exit", () =>
+        {
+            var s = new UnlockController(); s.KeyDown(Escape, 0);
+            var digit = new PhysicalKey(0x62, 0x50);
+            Check(s.KeyDown(digit, 1000)); s.KeyUp(digit, 1200);
+            s.Tick(8000); Check(s.Phase == UnlockPhase.Playing);
+        });
+        RunSoundTests();
     }
 
     static partial void RunIntegration(string appPath);
