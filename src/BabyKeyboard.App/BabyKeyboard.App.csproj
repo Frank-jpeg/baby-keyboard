@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <StartupObject>BabyKeyboard.App.Program</StartupObject>
+    <AssemblyName>BabyKeyboard</AssemblyName>
+    <Version>1.0.0</Version>
+    <AssemblyTitle>宝宝键盘</AssemblyTitle>
+    <Description>全屏彩色键盘互动 · 长按回车 3 秒退出</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\BabyKeyboard.ico</ApplicationIcon>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BabyKeyboard.Core\BabyKeyboard.Core.csproj" />
+    <InternalsVisibleTo Include="BabyKeyboard.Tests" />
+  </ItemGroup>
+</Project>

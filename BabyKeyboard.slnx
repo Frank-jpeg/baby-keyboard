@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BabyKeyboard.App/BabyKeyboard.App.csproj" />
+    <Project Path="src/BabyKeyboard.Core/BabyKeyboard.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BabyKeyboard.Tests/BabyKeyboard.Tests.csproj" />
+  </Folder>
+</Solution>
