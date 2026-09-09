@@ -5,7 +5,7 @@
     <UseWPF>true</UseWPF>
     <StartupObject>BabyKeyboard.App.Program</StartupObject>
     <AssemblyName>BabyKeyboard</AssemblyName>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <AssemblyTitle>宝宝键盘</AssemblyTitle>
     <Description>全屏彩色键盘互动 · 小键盘 1～8 切换音色 · 长按 Esc 3 秒退出</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>

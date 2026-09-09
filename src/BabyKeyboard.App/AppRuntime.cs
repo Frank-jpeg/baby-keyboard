@@ -111,6 +111,9 @@ internal sealed class AppRuntime
             {
                 0 => (int)selectedSound + 1,
                 1 => appliedSoundRevision,
+                2 => input?.Snapshot.HeldCount ?? previewUnlock.HeldCount,
+                3 => (int)(input?.Snapshot.Phase ?? previewUnlock.Phase),
+                4 => (long)((input?.Snapshot.Progress ?? 0) * 1000),
                 _ => -1
             } : null
         };
@@ -161,7 +164,8 @@ internal sealed class AppRuntime
         {
             double ms = Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
             previewUnlock.Tick(ms);
-            snapshot = new(previewUnlock.Phase, previewUnlock.Progress(ms), previewUnlock.HeldCount, selectedSound);
+            snapshot = new(previewUnlock.Phase, previewUnlock.Progress(ms), previewUnlock.HeldCount, selectedSound,
+                EscapeHeld: previewUnlock.EscapeHeld);
             if (previewUnlock.Phase == UnlockPhase.Complete) RequestExit();
         }
         else

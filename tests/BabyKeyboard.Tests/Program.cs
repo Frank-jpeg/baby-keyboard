@@ -21,6 +21,13 @@ internal static partial class Program
             ExportSounds(args[1]);
             return 0;
         }
+        if (args.FirstOrDefault() == "--unlock-regression")
+        {
+            RunUnlockCoreRegressions();
+            RunUnlockRegressions(args[1]);
+            Console.WriteLine($"RESULT: {passed} passed, {failed} failed");
+            return failed == 0 ? 0 : 1;
+        }
         RunCoreTests();
         if (args.Length > 0 && args[0] == "--integration") RunIntegration(args[1]);
         Console.WriteLine($"RESULT: {passed} passed, {failed} failed");
@@ -196,6 +203,7 @@ internal static partial class Program
             Check(s.KeyDown(digit, 1000)); s.KeyUp(digit, 1200);
             s.Tick(8000); Check(s.Phase == UnlockPhase.Playing);
         });
+        RunUnlockCoreRegressions();
         RunSoundTests();
     }
 

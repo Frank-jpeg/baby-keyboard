@@ -9,7 +9,7 @@ namespace BabyKeyboard.App;
 internal readonly record struct InputSignal(int VirtualKey, int X = 0, int Y = 0, bool Click = false,
     SoundPreset Sound = SoundPreset.Crystal);
 internal sealed record InputSnapshot(UnlockPhase Phase, double Progress, int HeldCount,
-    SoundPreset Sound = SoundPreset.Crystal, long SoundRevision = 0);
+    SoundPreset Sound = SoundPreset.Crystal, long SoundRevision = 0, bool EscapeHeld = false);
 
 internal sealed class InputInterceptor : IDisposable
 {
@@ -60,9 +60,12 @@ internal sealed class InputInterceptor : IDisposable
             threadId = Native.GetCurrentThreadId();
             Native.PeekMessage(out _, 0, 0, 0, 0);
             List<int> held = [];
+            // GetAsyncKeyState is useful only before suppression; suppressed downs never update its state.
             for (int vk = 8; vk < 255; vk++)
                 if (vk is not (0x10 or 0x11 or 0x12) && Native.GetAsyncKeyState(vk) < 0) held.Add(vk);
-            foreach (var (vk, button) in new[] { (1, PointerButton.Left), (2, PointerButton.Right),
+            bool swapped = Native.GetSystemMetrics(23) != 0;
+            foreach (var (vk, button) in new[] { (1, swapped ? PointerButton.Right : PointerButton.Left),
+                (2, swapped ? PointerButton.Left : PointerButton.Right),
                 (4, PointerButton.Middle), (5, PointerButton.Back), (6, PointerButton.Forward) })
                 if (Native.GetAsyncKeyState(vk) < 0) inheritedButtons.Add(button);
             controller = new UnlockController(held, inheritedButtons);
@@ -106,7 +109,7 @@ internal sealed class InputInterceptor : IDisposable
         Interlocked.Exchange(ref pulse, Stopwatch.GetTimestamp());
         double now = Now;
         controller.Tick(now);
-        Volatile.Write(ref snapshot, new(controller.Phase, controller.Progress(now), controller.HeldCount, selectedSound, soundRevision));
+        Volatile.Write(ref snapshot, new(controller.Phase, controller.Progress(now), controller.HeldCount, selectedSound, soundRevision, controller.EscapeHeld));
         if (controller.Phase == UnlockPhase.Complete && !completeNotified)
         {
             completeNotified = true;
@@ -121,7 +124,7 @@ internal sealed class InputInterceptor : IDisposable
         {
             var data = Marshal.PtrToStructure<Native.KeyboardData>(lParam);
             var key = new PhysicalKey((int)data.Vk, (int)data.Scan, (data.Flags & 1) != 0);
-            bool inherited = controller.IsInheritedKey(key.VirtualKey);
+            bool inherited = controller.IsInheritedKey(key);
             int message = (int)wParam;
             if (message is Native.WmKeyDown or Native.WmSysKeyDown)
             {

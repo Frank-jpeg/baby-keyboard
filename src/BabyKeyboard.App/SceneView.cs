@@ -262,6 +262,7 @@ internal sealed class SceneView : FrameworkElement
         {
             UnlockPhase.Holding => $"还有 {Math.Max(0, 3 * (1 - Input.Progress)):0.0} 秒 · 提前松开会取消",
             UnlockPhase.AwaitingRelease or UnlockPhase.Complete => "松开所有按键和鼠标按钮",
+            _ when Input.EscapeHeld => "先全部松手，再长按 Esc 3 秒",
             _ => "按满后松手，即可返回桌面"
         };
         Text(dc, headline, 16 * scale, active ? "#C7FBE7" : "#D0DEE6", new(pill.X + 84 * scale, pill.Y + 26 * scale));

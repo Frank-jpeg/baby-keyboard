@@ -43,6 +43,7 @@ internal static partial class Program
         bool originalNumLock = fixture.NumLock;
         try
         {
+            RunNativeUnlockRegressions(appPath, fixture, observer, baseline);
             Test("Native protection blocks key, mouse, wheel, Win, Alt+Tab and Alt+F4 events", () =>
             {
                 using var child = new ProtectedRun(appPath, fixture, 30);
