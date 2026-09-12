@@ -9,7 +9,8 @@ namespace BabyKeyboard.App;
 internal readonly record struct InputSignal(int VirtualKey, int X = 0, int Y = 0, bool Click = false,
     SoundPreset Sound = SoundPreset.Crystal);
 internal sealed record InputSnapshot(UnlockPhase Phase, double Progress, int HeldCount,
-    SoundPreset Sound = SoundPreset.Crystal, long SoundRevision = 0, bool EscapeHeld = false);
+    SoundPreset Sound = SoundPreset.Crystal, long SoundRevision = 0, bool EscapeHeld = false,
+    bool MouseEscapeHeld = false, double MouseEscapeProgress = 0);
 
 internal sealed class InputInterceptor : IDisposable
 {
@@ -26,6 +27,9 @@ internal sealed class InputInterceptor : IDisposable
     private Exception? error;
     private long pulse = Stopwatch.GetTimestamp();
     private bool completeNotified;
+    private bool mouseEscapeHeld;
+    private bool mouseEscapeTriggered;
+    private double mouseEscapeStartedAt;
     private int stopping;
     private SoundPreset selectedSound;
     private long soundRevision;
@@ -109,7 +113,16 @@ internal sealed class InputInterceptor : IDisposable
         Interlocked.Exchange(ref pulse, Stopwatch.GetTimestamp());
         double now = Now;
         controller.Tick(now);
-        Volatile.Write(ref snapshot, new(controller.Phase, controller.Progress(now), controller.HeldCount, selectedSound, soundRevision, controller.EscapeHeld));
+        double mouseProgress = mouseEscapeHeld
+            ? Math.Clamp((now - mouseEscapeStartedAt) / UnlockController.HoldMilliseconds, 0, 1)
+            : 0;
+        Volatile.Write(ref snapshot, new(controller.Phase, controller.Progress(now), controller.HeldCount,
+            selectedSound, soundRevision, controller.EscapeHeld, mouseEscapeHeld, mouseProgress));
+        if (mouseEscapeHeld && !mouseEscapeTriggered && now - mouseEscapeStartedAt >= UnlockController.HoldMilliseconds)
+        {
+            mouseEscapeTriggered = true;
+            Unlocked?.Invoke();
+        }
         if (controller.Phase == UnlockPhase.Complete && !completeNotified)
         {
             completeNotified = true;
@@ -167,11 +180,26 @@ internal sealed class InputInterceptor : IDisposable
                 bool down = message is 0x201 or 0x204 or 0x207 or 0x20B;
                 if (down)
                 {
+                    if (b == PointerButton.Left && IsEscapePanelPoint(data.Position))
+                    {
+                        mouseEscapeHeld = true;
+                        mouseEscapeTriggered = false;
+                        mouseEscapeStartedAt = Now;
+                    }
                     if (controller.ButtonDown(b, Now))
                         signals.Writer.TryWrite(new(0, data.Position.X, data.Position.Y, true, selectedSound));
                 }
                 else
                 {
+                    // A release can arrive between two timer ticks. Check the elapsed hold here
+                    // as well so releasing at (or just after) three seconds still exits.
+                    if (b == PointerButton.Left && mouseEscapeHeld &&
+                        Now - mouseEscapeStartedAt >= UnlockController.HoldMilliseconds && !mouseEscapeTriggered)
+                    {
+                        mouseEscapeTriggered = true;
+                        Unlocked?.Invoke();
+                    }
+                    if (b == PointerButton.Left) mouseEscapeHeld = false;
                     bool inherited = inheritedButtons.Remove(b);
                     controller.ButtonUp(b, Now);
                     Update();
@@ -182,6 +210,21 @@ internal sealed class InputInterceptor : IDisposable
         }
         catch (Exception ex) { Fail(ex); }
         return 1;
+    }
+
+    private static bool IsEscapePanelPoint(Native.Point point)
+    {
+        // The Esc help pill is rendered in the lower-right portion of every protected monitor.
+        // Keep the hit area forgiving so DPI scaling and different window sizes do not make the
+        // emergency mouse exit hard to find.
+        foreach (var monitor in Native.Monitors())
+        {
+            var r = monitor.Bounds;
+            if (point.X >= r.Left + r.Width * 0.56 && point.X < r.Right &&
+                point.Y >= r.Top + r.Height * 0.76 && point.Y < r.Bottom)
+                return true;
+        }
+        return false;
     }
 
     private void Fail(Exception ex)

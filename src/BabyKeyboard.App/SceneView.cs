@@ -247,18 +247,21 @@ internal sealed class SceneView : FrameworkElement
 
         double width = 354 * scale;
         var pill = new Rect(soundPanel.Right + 18 * scale, top, width, 108 * scale);
-        bool active = Input.Phase is UnlockPhase.Holding or UnlockPhase.AwaitingRelease or UnlockPhase.Complete;
+        bool mouseExitActive = Input.MouseEscapeHeld;
+        bool active = mouseExitActive || Input.Phase is UnlockPhase.Holding or UnlockPhase.AwaitingRelease or UnlockPhase.Complete;
         dc.DrawRoundedRectangle(Brush(active ? "#163431" : "#121E2C"), new Pen(Brush(active ? "#6CA99C" : "#30404E"), 1), pill, 19 * scale, 19 * scale);
         var key = new Rect(pill.X + 18 * scale, pill.Y + 31 * scale, 51 * scale, 38 * scale);
         dc.DrawRoundedRectangle(Brush("#223644"), new Pen(Brush("#637987"), .8), key, 9 * scale, 9 * scale);
         CenterText(dc, "Esc", 17 * scale, "#BCDAD9", new(key.X + key.Width / 2, key.Y + 6 * scale));
-        string headline = Input.Phase switch
+        string headline = mouseExitActive ? "鼠标按住这里…" : Input.Phase switch
         {
             UnlockPhase.Holding => "继续按住 Esc…",
             UnlockPhase.AwaitingRelease or UnlockPhase.Complete => "松手退出",
             _ => "长按 Esc 3 秒退出"
         };
-        string detail = Input.Phase switch
+        string detail = mouseExitActive
+            ? $"再按 {Math.Max(0, 3 * (1 - Input.MouseEscapeProgress)):0.0} 秒即可退出"
+            : Input.Phase switch
         {
             UnlockPhase.Holding => $"还有 {Math.Max(0, 3 * (1 - Input.Progress)):0.0} 秒 · 提前松开会取消",
             UnlockPhase.AwaitingRelease or UnlockPhase.Complete => "松开所有按键和鼠标按钮",
@@ -269,7 +272,8 @@ internal sealed class SceneView : FrameworkElement
         Text(dc, detail, 11 * scale, "#849CA7", new(pill.X + 84 * scale, pill.Y + 58 * scale));
         if (active)
         {
-            var line = new Rect(pill.X + 18 * scale, pill.Bottom - 8 * scale, (width - 36 * scale) * Input.Progress, 2 * scale);
+            double progress = mouseExitActive ? Input.MouseEscapeProgress : Input.Progress;
+            var line = new Rect(pill.X + 18 * scale, pill.Bottom - 8 * scale, (width - 36 * scale) * progress, 2 * scale);
             dc.DrawRoundedRectangle(Brush("#9BF3CC"), null, line, scale, scale);
         }
         double pad = 46 * scale;
