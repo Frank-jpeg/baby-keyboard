@@ -165,14 +165,16 @@ internal static partial class Program
         });
         Test("Numpad 1 to 8 select the eight instruments directly", () =>
         {
-            Check(SoundPresets.All.Count == 8);
+            Check(SoundPresets.All.Count == 9);
             for (int i = 0; i < 8; i++)
             {
                 Check(SoundPresets.FromNumpad(new(0x61 + i)) == (SoundPreset)i);
                 Check(SoundPresets.Get((SoundPreset)i).Number == i + 1);
             }
             Check(SoundPresets.Get(SoundPreset.Piano).Number == 2);
-            Check(SoundPresets.FromNumpad(new(0x60)) is null && SoundPresets.FromNumpad(new(0x69)) is null);
+            Check(SoundPresets.FromNumpad(new(0x69)) == SoundPreset.Mix);
+            Check(SoundPresets.Get(SoundPreset.Mix).Number == 9);
+            Check(SoundPresets.FromNumpad(new(0x60)) is null);
         });
         Test("Numpad selection works with Num Lock off without changing dedicated arrows", () =>
         {
@@ -185,6 +187,7 @@ internal static partial class Program
                 Check(SoundPresets.FromNumpad(new(navigation[i])) is null);
                 Check(SoundPresets.FromNumpad(new(0x31 + i, 2 + i)) is null);
             }
+            Check(SoundPresets.FromNumpad(new(0x29, 0x49)) == SoundPreset.Mix);
         });
         Test("Numpad identity survives Num Lock / Shift VK changes and ignores repeats", () =>
         {

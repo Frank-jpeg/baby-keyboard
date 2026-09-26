@@ -1,6 +1,6 @@
 namespace BabyKeyboard.Core;
 
-/// <summary>Eight offline pentatonic instruments. Prepared on the audio thread; bounded voices and quiet output.</summary>
+/// <summary>Nine offline pentatonic instruments, including a mix of the first eight. Prepared on the audio thread; bounded voices and quiet output.</summary>
 public sealed class SoftToneMixer
 {
     public const int SampleRate = 48000;
@@ -68,12 +68,30 @@ public sealed class SoftToneMixer
     private static float[][][] CreateBank()
     {
         var result = new float[SoundPresets.All.Count][][];
-        foreach (var info in SoundPresets.All)
+        foreach (var info in SoundPresets.All.Where(info => info.Preset != SoundPreset.Mix))
         {
             var instrument = new float[Notes.Length][];
             for (int i = 0; i < Notes.Length; i++)
                 instrument[i] = CreateNote(info.Preset, 440 * Math.Pow(2, (Notes[i] - 69) / 12.0));
             result[(int)info.Preset] = instrument;
+        }
+        int mixIndex = (int)SoundPreset.Mix;
+        result[mixIndex] = new float[Notes.Length][];
+        for (int note = 0; note < Notes.Length; note++)
+        {
+            int length = result.Take(8).Max(instrument => instrument[note].Length);
+            var mixed = new float[length];
+            for (int i = 0; i < length; i++)
+            {
+                double value = 0;
+                for (int preset = 0; preset < 8; preset++)
+                {
+                    var wave = result[preset][note];
+                    if (i < wave.Length) value += wave[i] / 8.0;
+                }
+                mixed[i] = (float)value;
+            }
+            result[mixIndex][note] = mixed;
         }
         return result;
     }

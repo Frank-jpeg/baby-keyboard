@@ -222,16 +222,16 @@ internal sealed class SceneView : FrameworkElement
 
     private void DrawFooter(DrawingContext dc, double w, double h, double scale)
     {
-        scale = Math.Min(scale, Math.Max(.2, (w - 32) / 1056));
-        double left = (w - 1056 * scale) / 2;
+        scale = Math.Min(scale, Math.Max(.2, (w - 32) / 1150));
+        double left = (w - 1150 * scale) / 2;
         double top = h - 152 * scale;
-        var soundPanel = new Rect(left, top, 684 * scale, 108 * scale);
+        var soundPanel = new Rect(left, top, 770 * scale, 108 * scale);
         bool justSelected = Time - soundSelectedAt < 1.1;
         dc.DrawRoundedRectangle(Brush("#121E2C"), new Pen(Brush(justSelected ? "#83C8BA" : "#30404E"), 1), soundPanel, 19 * scale, 19 * scale);
         var selected = SoundPresets.Get(selectedSound);
         Text(dc, selected.Name, 18 * scale, "#C9F6E8", new(left + 20 * scale, top + 11 * scale));
         Text(dc, selected.Description, 10 * scale, "#8099A6", new(left + 21 * scale, top + 39 * scale));
-        Text(dc, "小键盘 1～8 切换音色", 11 * scale, "#9CADBA", new(soundPanel.Right - 159 * scale, top + 18 * scale));
+        Text(dc, "小键盘 1～9 切换音色", 11 * scale, "#9CADBA", new(soundPanel.Right - 159 * scale, top + 18 * scale));
         foreach (var sound in SoundPresets.All)
         {
             bool chosen = sound.Preset == selectedSound;
