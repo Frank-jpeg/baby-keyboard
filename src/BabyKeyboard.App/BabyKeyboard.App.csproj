@@ -5,7 +5,7 @@
     <UseWPF>true</UseWPF>
     <StartupObject>BabyKeyboard.App.Program</StartupObject>
     <AssemblyName>BabyKeyboard</AssemblyName>
-    <Version>1.1.3</Version>
+    <Version>1.2.0</Version>
     <AssemblyTitle>宝宝键盘</AssemblyTitle>
     <Description>全屏彩色键盘互动 · 小键盘 1～9 切换音色 · 长按 Esc 或右下角提示退出</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -15,6 +15,7 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
   <ItemGroup>
+    <Resource Include="Assets\rest-pikachu-v2.jpg" />
     <ProjectReference Include="..\BabyKeyboard.Core\BabyKeyboard.Core.csproj" />
     <InternalsVisibleTo Include="BabyKeyboard.Tests" />
   </ItemGroup>

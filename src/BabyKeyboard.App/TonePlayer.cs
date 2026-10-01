@@ -12,6 +12,8 @@ internal sealed class TonePlayer : IDisposable
         { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true, SingleWriter = true });
     private readonly Thread? thread;
     private volatile bool stopping, available;
+    private volatile bool muted;
+    internal void Mute() => muted = true;
     private int selectedSound;
     internal bool Available => available;
 
@@ -24,7 +26,7 @@ internal sealed class TonePlayer : IDisposable
 
     internal void Play(int key)
     {
-        if (available) notes.Writer.TryWrite(new(key, (SoundPreset)Volatile.Read(ref selectedSound)));
+        if (available && !muted) notes.Writer.TryWrite(new(key, (SoundPreset)Volatile.Read(ref selectedSound)));
     }
 
     internal void SelectPreset(SoundPreset sound)
@@ -62,6 +64,7 @@ internal sealed class TonePlayer : IDisposable
                 if (waveOutWrite(device, header, size) != 0) return;
             }
             available = true;
+            double gain = 1;
             while (!stopping)
             {
                 foreach (var block in blocks)
@@ -71,11 +74,17 @@ internal sealed class TonePlayer : IDisposable
                     if (mixer.Preset != sound)
                     {
                         mixer.ChangePreset(sound);
-                        mixer.Trigger(64);
+                        if (!muted) mixer.Trigger(64);
                     }
                     while (notes.Reader.TryRead(out var note))
-                        if (note.Sound == sound) mixer.Trigger(note.Key);
+                        if (!muted && note.Sound == sound) mixer.Trigger(note.Key);
                     mixer.Fill(samples);
+                    // Fade the remaining voices over 200 ms, then submit silence.
+                    for (int i = 0; i < samples.Length; i++)
+                    {
+                        if (muted) gain = Math.Max(0, gain - 1.0 / (SoftToneMixer.SampleRate * .2));
+                        samples[i] = (short)(samples[i] * gain);
+                    }
                     Marshal.Copy(samples, 0, block.Data, samples.Length);
                     if (waveOutWrite(device, block.Header, size) != 0) return;
                 }

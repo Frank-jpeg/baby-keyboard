@@ -46,10 +46,11 @@ internal static class Program
         if (args.FirstOrDefault() == "--guardian") return Guardian.Run(args);
         try
         {
-            if (args.FirstOrDefault() == "--render-preview")
+            if (args.FirstOrDefault() is "--render-preview" or "--render-rest-preview")
             {
                 if (args.Length < 2) throw new ArgumentException("需要指定预览图片路径。");
-                RenderPreview(args[1], args.Length > 2 ? double.Parse(args[2], CultureInfo.InvariantCulture) : 1);
+                RenderPreview(args[1], args.Length > 2 ? double.Parse(args[2], CultureInfo.InvariantCulture) : 1,
+                    args[0] == "--render-rest-preview");
                 return 0;
             }
             var options = AppOptions.Parse(args);
@@ -68,12 +69,17 @@ internal static class Program
         }
     }
 
-    private static void RenderPreview(string path, double scale)
+    private static void RenderPreview(string path, double scale, bool resting = false)
     {
         if (scale < .5 || scale > 2) throw new ArgumentException("预览缩放超出范围。");
         var app = new Application();
         var view = new SceneView { Width = 1440, Height = 900, Preview = true };
         view.Demo();
+        if (resting)
+        {
+            view.Session = new BabyKeyboard.Core.PlaySession(300);
+            view.Session.Update(300);
+        }
         view.Measure(new Size(1440, 900));
         view.Arrange(new Rect(0, 0, 1440, 900));
         view.UpdateLayout();

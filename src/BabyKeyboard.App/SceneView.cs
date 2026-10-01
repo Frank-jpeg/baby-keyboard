@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using BabyKeyboard.Core;
 
 namespace BabyKeyboard.App;
@@ -22,8 +23,15 @@ internal sealed class SceneView : FrameworkElement
     private bool hasPlayed;
     private double? manualTime;
     private SoundPreset selectedSound;
+    private static readonly Lazy<BitmapImage> RestBackground = new(() =>
+    {
+        var bitmap = new BitmapImage(new Uri("pack://application:,,,/Assets/rest-pikachu-v2.jpg"));
+        bitmap.Freeze();
+        return bitmap;
+    });
     private double soundSelectedAt = double.NegativeInfinity;
     internal bool Preview { get; set; }
+    internal PlaySession? Session { get; set; }
     internal bool SoundAvailable { get; set; } = true;
     internal InputSnapshot Input { get; set; } = new(UnlockPhase.Playing, 0, 0);
     private double Time => manualTime ?? clock.Elapsed.TotalSeconds;
@@ -100,8 +108,23 @@ internal sealed class SceneView : FrameworkElement
         dc.DrawDrawing(backdrop);
         double uiScale = Math.Clamp(Math.Min(w / 1440, h / 900), .65, 1.6);
         DrawHeader(dc, w, uiScale);
+        if (Session?.Phase == PlayPhase.Resting)
+        {
+            bursts.Clear();
+            var background = new ImageBrush(RestBackground.Value) { Stretch = Stretch.UniformToFill };
+            dc.DrawRectangle(background, null, new Rect(0, 0, w, h));
+            double textScale = Math.Min(w / 1440, h / 900);
+            Text(dc, "该休息一下啦", 40 * textScale, "#FFFFFF", new(w * .075, h * .30));
+            Text(dc, "皮卡丘也睡着了", 21 * textScale, "#E6CCCD", new(w * .075, h * .30 + 75 * textScale));
+            Text(dc, "放下键盘，和家人一起活动一下吧", 17 * textScale, "#C4AAAC", new(w * .075, h * .30 + 120 * textScale));
+            DrawFooter(dc, w, h, uiScale, resting: true);
+            return;
+        }
         if (!hasPlayed || bursts.Count == 0) DrawInvitation(dc, w, h, uiScale);
         foreach (var burst in bursts) DrawBurst(dc, burst, w, h, uiScale);
+        if (Session?.Phase == PlayPhase.Warning)
+            CenterText(dc, $"还有 {Math.Ceiling(Session.RemainingSeconds):0} 秒，小星星就要休息啦", 16 * uiScale,
+                "#C9F6E8", new(w / 2, h * .19));
         DrawFooter(dc, w, h, uiScale);
     }
 
@@ -220,12 +243,14 @@ internal sealed class SceneView : FrameworkElement
         dc.Pop();
     }
 
-    private void DrawFooter(DrawingContext dc, double w, double h, double scale)
+    private void DrawFooter(DrawingContext dc, double w, double h, double scale, bool resting = false)
     {
         scale = Math.Min(scale, Math.Max(.2, (w - 32) / 1150));
         double left = (w - 1150 * scale) / 2;
         double top = h - 152 * scale;
         var soundPanel = new Rect(left, top, 770 * scale, 108 * scale);
+        if (!resting)
+        {
         bool justSelected = Time - soundSelectedAt < 1.1;
         dc.DrawRoundedRectangle(Brush("#121E2C"), new Pen(Brush(justSelected ? "#83C8BA" : "#30404E"), 1), soundPanel, 19 * scale, 19 * scale);
         var selected = SoundPresets.Get(selectedSound);
@@ -245,6 +270,7 @@ internal sealed class SceneView : FrameworkElement
             Text(dc, sound.ShortName, 11 * scale, chosen ? "#D7F8E9" : "#9DB0BF", new(chip.X + 29 * scale, chip.Y + 6 * scale));
         }
 
+        }
         double width = 354 * scale;
         var pill = new Rect(soundPanel.Right + 18 * scale, top, width, 108 * scale);
         bool mouseExitActive = Input.MouseEscapeHeld;
@@ -266,7 +292,7 @@ internal sealed class SceneView : FrameworkElement
             UnlockPhase.Holding => $"还有 {Math.Max(0, 3 * (1 - Input.Progress)):0.0} 秒 · 提前松开会取消",
             UnlockPhase.AwaitingRelease or UnlockPhase.Complete => "松开所有按键和鼠标按钮",
             _ when Input.EscapeHeld => "先全部松手，再长按 Esc 3 秒",
-            _ => "按满后松手，即可返回桌面"
+            _ => "或鼠标左键按住这里 3 秒退出"
         };
         Text(dc, headline, 16 * scale, active ? "#C7FBE7" : "#D0DEE6", new(pill.X + 84 * scale, pill.Y + 26 * scale));
         Text(dc, detail, 11 * scale, "#849CA7", new(pill.X + 84 * scale, pill.Y + 58 * scale));
@@ -276,6 +302,7 @@ internal sealed class SceneView : FrameworkElement
             var line = new Rect(pill.X + 18 * scale, pill.Bottom - 8 * scale, (width - 36 * scale) * progress, 2 * scale);
             dc.DrawRoundedRectangle(Brush("#9BF3CC"), null, line, scale, scale);
         }
+        if (resting) return;
         double pad = 46 * scale;
         for (int i = 0; i < 4; i++)
         {

@@ -28,6 +28,8 @@ internal sealed class AppRuntime
     private SoundPreset selectedSound;
     private long appliedSoundRevision;
     private double lastFrame;
+    private PlaySession session = new(300);
+    private readonly Stopwatch playClock = new();
 
     internal AppRuntime(AppOptions options)
     {
@@ -57,6 +59,13 @@ internal sealed class AppRuntime
     {
         try
         {
+            if (!options.Test)
+            {
+                var setup = new SessionSetupWindow();
+                if (setup.ShowDialog() != true) { Stop(); return; }
+                session = new PlaySession(setup.Minutes * 60);
+            }
+            age.Restart();
             var monitors = Native.Monitors();
             if (!options.Preview)
             {
@@ -83,6 +92,7 @@ internal sealed class AppRuntime
                 RestrictCursor(monitors[0]);
             }
             active = true;
+            playClock.Restart();
             Interlocked.Exchange(ref uiPulse, Stopwatch.GetTimestamp());
             pulseTimer.Start();
             CompositionTarget.Rendering += Render;
@@ -118,6 +128,7 @@ internal sealed class AppRuntime
             } : null
         };
         window.Scene.SelectSound(selectedSound, animate: false);
+        window.Scene.Session = session;
         if (options.Preview) window.Closed += (_, _) => RequestExit();
         return window;
     }
@@ -137,6 +148,7 @@ internal sealed class AppRuntime
     private void PulseUi()
     {
         Interlocked.Exchange(ref uiPulse, Stopwatch.GetTimestamp());
+        UpdateSession();
         if (options.Test && age.Elapsed.TotalSeconds >= options.TimeoutSeconds) { RequestExit(); return; }
         // Windows may clear a process's clip when another window is activated (including notifications).
         // Buttons remain globally intercepted during this interval; promptly restore the cursor boundary.
@@ -159,6 +171,7 @@ internal sealed class AppRuntime
         double now = age.Elapsed.TotalSeconds;
         if (now - lastFrame < 1.0 / 65 || stopped) return;
         lastFrame = now;
+        UpdateSession();
         InputSnapshot snapshot;
         if (options.Preview)
         {
@@ -180,6 +193,7 @@ internal sealed class AppRuntime
         int budget = 32;
         while (budget-- > 0 && input is not null && input.TryRead(out var signal))
         {
+            if (session.Phase == PlayPhase.Resting) continue;
             foreach (var window in windows)
             {
                 if (signal.Click)
@@ -202,6 +216,7 @@ internal sealed class AppRuntime
 
     private void SelectSound(SoundPreset sound)
     {
+        if (session.Phase == PlayPhase.Resting) return;
         selectedSound = sound;
         audio?.SelectPreset(sound);
         foreach (var window in windows) window.Scene.SelectSound(sound);
@@ -220,6 +235,8 @@ internal sealed class AppRuntime
         {
             if (!down) { previewUnlock.KeyUp(key, Now()); return; }
             if (!previewUnlock.KeyDown(key, Now())) return;
+            UpdateSession();
+            if (session.Phase == PlayPhase.Resting) return;
             var choice = SoundPresets.FromNumpad(key);
             if (choice is { } sound) { appliedSoundRevision++; SelectSound(sound); }
             int labelKey = choice is { } digit ? 0x61 + (int)digit : key.VirtualKey;
@@ -230,6 +247,8 @@ internal sealed class AppRuntime
         {
             if (previewUnlock.ButtonDown(Button(e.ChangedButton), Now()))
             {
+                UpdateSession();
+                if (session.Phase == PlayPhase.Resting) return;
                 window.Scene.AddClick(e.GetPosition(window.Scene));
                 audio?.Play(0);
             }
@@ -241,6 +260,12 @@ internal sealed class AppRuntime
     {
         var bounds = monitor.Bounds.Inset(8);
         if (!Native.ClipCursor(ref bounds)) throw new InvalidOperationException("无法限制鼠标区域。");
+    }
+
+    private void UpdateSession()
+    {
+        session.Update(playClock.Elapsed.TotalSeconds);
+        if (session.Phase == PlayPhase.Resting) audio?.Mute();
     }
 
     private void QueueDisplayUpdate()

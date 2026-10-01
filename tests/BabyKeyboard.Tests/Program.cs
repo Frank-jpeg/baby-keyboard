@@ -29,6 +29,7 @@ internal static partial class Program
             return failed == 0 ? 0 : 1;
         }
         RunCoreTests();
+        RunPlaySessionTests();
         if (args.Length > 0 && args[0] == "--integration") RunIntegration(args[1]);
         Console.WriteLine($"RESULT: {passed} passed, {failed} failed");
         return failed == 0 ? 0 : 1;
